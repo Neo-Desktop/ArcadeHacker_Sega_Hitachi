@@ -1,4 +1,4 @@
-#define version "Sega System16/18/24/X Hitachi FD1094 Security Programmer 1.1 by arcadehacker.blogspot.com"
+#define version "Sega System16/18/24/X Hitachi FD1094 Security Programmer 1.2 by arcadehacker.blogspot.com"
 
 // Uncomment the game you would like to program from the list below, only one line must be uncommented at any time.
 
@@ -165,7 +165,7 @@ const char *Game = "BLANK      XXXXXX XXX-XXXX";      const PROGMEM uint16_t Enc
 
 
 // Temp buffer to store input line
-#define TEMP_SIZE   512
+#define TEMP_SIZE   256
 char temp[TEMP_SIZE];
 
 int cBits[8];
@@ -210,25 +210,25 @@ int invertbit(int Bit)
 
 int parity(unsigned char cByte) 
 {
-int bits[8];
-Byte2Bits(cByte, bits);
-int xor1 = bits[0] ^ bits[1];
-int xor2 = bits[2] ^ bits[3];
-int xor3 = bits[4] ^ bits[5];
-int xor4 = bits[6] ^ bits[7];
-int xora = xor1 ^ xor2;
-int xorb = xor3 ^ xor4;
-int xorf = xora ^ xorb;
-return invertbit(xorf);
+  int bits[8];
+  
+  Byte2Bits(cByte, bits);
+  int xor1 = bits[0] ^ bits[1];
+  int xor2 = bits[2] ^ bits[3];
+  int xor3 = bits[4] ^ bits[5];
+  int xor4 = bits[6] ^ bits[7];
+  int xora = xor1 ^ xor2;
+  int xorb = xor3 ^ xor4;
+  int xorf = xora ^ xorb;
+  return invertbit(xorf);
 }
 
-void readportanalog(char port)
+float readportanalog(char port)
 {   
-
     int value = analogRead(port);
     float voltage = value * (5.0 / 1023.0);
-    Serial.print(voltage);
-
+    //Serial.print(voltage);
+    return(voltage);
 }
 
 void clk68k(int count)
@@ -305,6 +305,7 @@ void writesecret()
     digitalWrite(D0, HIGH); clkrw();
 }
 
+
 void dataverifydo() 
 {
     verifysecret();
@@ -313,8 +314,10 @@ void dataverifydo()
     pinMode(D0, INPUT); 
 
     for (int c=0; c <= 8191; c++) { 
+      float voltage;
+      
       p(" Addr: "); Serial.print(c);
-      p(" Read volts: "); readportanalog(D0);       
+      p(" Read volts: "); voltage = readportanalog(D0); Serial.print(voltage);
       cByte = pgm_read_byte_near(EncryptionKey + c);
       p(" Config Parity: "); Serial.print(parity(cByte));
       p(" Chip Parity: "); Serial.print(digitalRead(D0));    
@@ -322,7 +325,44 @@ void dataverifydo()
       p("\r\n");  
       digitalWrite(AS, HIGH); digitalWrite(AS, LOW);      
    }
+}
 
+void dataverifyfastdo() 
+{
+    int differences = 0, linefeed = 0;
+    verifysecret();
+    
+    digitalWrite(RW, HIGH); digitalWrite(AD1, HIGH); // activate D0 INPUT
+    pinMode(D0, INPUT); 
+
+    differences = 0;
+    p("Verifying, please wait\r\n");
+    for (int c=0; c <= 8191; c++) { 
+      cByte = pgm_read_byte_near(EncryptionKey + c);    
+      if (parity(cByte) != digitalRead(D0))
+      {
+        differences ++;
+        p("X");
+      }
+      else
+        p(".");
+      digitalWrite(AS, HIGH); digitalWrite(AS, LOW);      
+
+      linefeed++;
+      if(linefeed == 64)
+      {
+          linefeed = 0;
+          p("\r\n");
+      } 
+   }
+   p("\r\n");
+   if(!differences)
+      p("Verified OK\r\n");
+   else
+   {
+      p("Verify FAILED, Number of differences: "); Serial.print(differences);
+      p(" out of 8192\r\nRun with 'v' for full report\r\n");
+   }
 }
 
 void datawritedo()
@@ -363,6 +403,15 @@ void dataverify()
     p(" Reset HIGH\r\n"); resethi(); 
 }
 
+void dataverifyfast()
+{
+    p(" Start \r\n");
+    p(" Reset LOW\r\n");  resetlo(); 
+    p(" Setup\r\n");      setupinit();  
+    p(" Working...\r\n"); dataverifyfastdo(); 
+    p(" Cleanup\r\n");    setupcleanup();
+    p(" Reset HIGH\r\n"); resethi(); 
+}
 
 void datawrite() 
 {
@@ -433,38 +482,41 @@ void setup()
     p("\r\n"); p(version); p("\r\n\r\n");
     p("Commands:\r\n"); 
     p("w  - Writes encryption key data into the FD1094 chip. Select your game by uncommenting the appropriate line in the arduino program source code.\r\n");
-    p("v  - Dumps and compares a parity bit for all encryption data bytes stored inside the FD1094 chip.\r\n\r\n");
+    p("v  - Dumps and compares a parity bit for all encryption data bytes stored inside the FD1094 chip.\r\n");
+    p("c  - Dumps and compares just as 'v' but giving only the global results from the operation.\r\n\r\n");
     p("Game configuration selected: "); p(Game); p("\r\n\r\n");
 }
 
 
 
 void loop()
-{
-          
-            if (Serial.available()>0)
-            {
-              
-                memset(temp, 0, TEMP_SIZE);
-                Serial.readBytesUntil('\r', temp, TEMP_SIZE-1);
+{     
+    if (Serial.available()>0)
+    {
+        memset(temp, 0, TEMP_SIZE);
+        Serial.readBytesUntil('\r', temp, TEMP_SIZE-1);
 
-                char *pTemp = temp;
+        char *pTemp = temp;
 
+        if (temp[0]=='w')
+        {
+           p("Data Write...\r\n"); 
+           datawrite();
+           p("Done!\r\n\r\n");
+        }
+        
+        if (temp[0]=='v')
+        {
+           p("Data Verify...\r\n"); 
+           dataverify();
+           p("Done!\r\n\r\n");
+        }
 
-                if (temp[0]=='w')
-                {
-                   p("Data Write...\r\n"); 
-                   datawrite();
-                   p("Done!\r\n\r\n");
-                }
-                
-                if (temp[0]=='v')
-                {
-                   p("Data Verify...\r\n"); 
-                   dataverify();
-                   p("Done!\r\n\r\n");
-                }
-                
-            }
-
+        if (temp[0]=='c')
+        {
+           p("Data Verify...\r\n"); 
+           dataverifyfast();
+           p("Done!\r\n\r\n");
+        }
+    }
 }
